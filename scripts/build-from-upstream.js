@@ -54,7 +54,14 @@ function resolveCodexVendor(platform) {
   if (!triple) return null;
   const binName = platform === "win" ? "codex.exe" : "codex";
 
-  // Try local node_modules
+  // Try platform-specific package (0.128+)
+  const PKG_MAP = { "mac-arm64": "codex-darwin-arm64", "mac-x64": "codex-darwin-x64", "win": "codex-win32-x64" };
+  const platPkg = PKG_MAP[platform];
+  if (platPkg) {
+    const p = path.join(PROJECT_ROOT, "node_modules", "@cometix", platPkg, "vendor", triple, "codex", binName);
+    if (fs.existsSync(p)) return p;
+  }
+  // Try old-style vendor (pre-0.128)
   const localPath = path.join(PROJECT_ROOT, "node_modules", "@cometix", "codex", "vendor", triple, "codex", binName);
   if (fs.existsSync(localPath)) return localPath;
 

@@ -44,6 +44,7 @@
     "fast-xml-parser": "^5.5.9"
   },
   "dependencies": {
+    "@cometix/codex-darwin-x64": "npm:@cometix/codex@^0.128.0-cometix-darwin-x64",
     "@sentry/electron": "^7.5.0",
     "@sentry/node": "10.29.0",
     "better-sqlite3": "^12.4.6",
@@ -62,7 +63,7 @@
     "zod": "^4.1.13"
   },
   "optionalDependencies": {
-    "@cometix/codex": "latest"
+    "@cometix/codex": "^0.128.0-cometix"
   },
   "codexBuildFlavor": "prod",
   "codexBuildNumber": "1272",
