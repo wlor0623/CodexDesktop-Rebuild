@@ -75,14 +75,19 @@ function resolveCodexVendor(platform) {
   if (fs.existsSync(localPath)) return localPath;
 
   // 3. npm pack platform package
-  const PLAT_SPEC = {
-    "linux-x64": "@cometix/codex@latest-linux-x64", "linux-arm64": "@cometix/codex@latest-linux-arm64",
-    "mac-arm64": "@cometix/codex@latest-darwin-arm64", "mac-x64": "@cometix/codex@latest-darwin-x64",
-    "win": "@cometix/codex@latest-win32-x64",
+  const PLAT_SUFFIX = {
+    "linux-x64": "linux-x64", "linux-arm64": "linux-arm64",
+    "mac-arm64": "darwin-arm64", "mac-x64": "darwin-x64", "win": "win32-x64",
   };
-  const spec = PLAT_SPEC[platform];
-  if (!spec) return null;
+  const suffix = PLAT_SUFFIX[platform];
+  if (!suffix) return null;
 
+  let baseVer;
+  try {
+    baseVer = execSync("npm view @cometix/codex version", { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+  } catch { return null; }
+
+  const spec = `@cometix/codex@${baseVer}-${suffix}`;
   console.log(`   [codex] fetching ${spec} via npm pack...`);
   const tmpDir = path.join(require("os").tmpdir(), "cometix-codex-pack");
   fs.mkdirSync(tmpDir, { recursive: true });
