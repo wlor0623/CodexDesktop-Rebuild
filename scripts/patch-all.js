@@ -12,6 +12,7 @@ const { execFileSync } = require("child_process");
 const path = require("path");
 
 const PATCHES = [
+  "patch-block-ab-chatgpt.js",
   "patch-i18n.js",
   "patch-copyright.js",
   "patch-devtools.js",
