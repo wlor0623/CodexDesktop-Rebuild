@@ -116,13 +116,29 @@ function buildMac(platform) {
   const variant = platform === "mac-arm64" ? "arm64" : "x64";
   const extractDir = path.join(tempDir, `${variant}-extract`);
 
-  // Find Codex.app
+  // Find the upstream .app bundle. The upstream product was renamed from
+  // Codex.app to ChatGPT.app, so identify it by its bundle structure rather
+  // than a hard-coded directory name.
   let appPath = null;
   if (fs.existsSync(extractDir)) {
     const findApp = (dir) => {
       for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-        if (e.name === "Codex.app" && e.isDirectory()) return path.join(dir, e.name);
-        if (e.isDirectory()) { const r = findApp(path.join(dir, e.name)); if (r) return r; }
+        const candidate = path.join(dir, e.name);
+        if (!e.isDirectory() && !e.isSymbolicLink()) continue;
+
+        if (e.name.endsWith(".app")) {
+          const asar = path.join(candidate, "Contents", "Resources", "app.asar");
+          try {
+            if (fs.statSync(candidate).isDirectory() && fs.existsSync(asar)) return candidate;
+          } catch { /* broken symlink or incomplete bundle; keep searching */ }
+        }
+
+        // Do not recurse into app bundles that did not match the expected
+        // structure; their contents are not another candidate bundle.
+        if (!e.name.endsWith(".app") && e.isDirectory()) {
+          const result = findApp(candidate);
+          if (result) return result;
+        }
       }
       return null;
     };
@@ -130,7 +146,7 @@ function buildMac(platform) {
   }
 
   if (!appPath) {
-    console.error(`[x] Codex.app not found in cache. Run sync-upstream first.`);
+    console.error(`[x] macOS .app bundle not found in cache. Run sync-upstream first.`);
     process.exit(1);
   }
 
