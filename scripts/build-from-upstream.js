@@ -170,6 +170,7 @@ function buildMac(platform) {
   const infoPlist = path.join(outApp, "Contents", "Info.plist");
   if (fs.existsSync(infoPlist)) {
     updateAsarIntegrity(asarPath, infoPlist);
+    overrideMinimumSystemVersion(infoPlist);
   }
 
   // 5. Strip original signature + quarantine
@@ -301,6 +302,21 @@ function updateAsarIntegrity(asarPath, infoPlistPath) {
   } else {
     console.log(`   [!] integrity verify failed`);
   }
+}
+
+function overrideMinimumSystemVersion(infoPlistPath) {
+  // The upstream app declares LSMinimumSystemVersion (currently 13.0) in its
+  // Info.plist, but its own Sparkle appcast still advertises a 12.0 runtime
+  // floor — i.e. the binaries run on macOS 12, the plist gate is just stricter.
+  // Lower the gate so the rebuilt app installs on 12.x again. Override with the
+  // MACOS_MIN_VERSION env var if needed.
+  const target = process.env.MACOS_MIN_VERSION || "12.0";
+  try {
+    execSync(`plutil -replace LSMinimumSystemVersion -string "${target}" "${infoPlistPath}"`, { stdio: "pipe" });
+  } catch {
+    execSync(`plutil -insert LSMinimumSystemVersion -string "${target}" "${infoPlistPath}"`, { stdio: "pipe" });
+  }
+  console.log(`   [min-os] LSMinimumSystemVersion -> ${target}`);
 }
 
 // ─── Shared ─────────────────────────────────────────────────────
