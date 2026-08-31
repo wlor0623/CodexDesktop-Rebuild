@@ -8,7 +8,7 @@ on:
         required: false
         default: "all"
         type: choice
-        options: [all, mac, windows, linux]
+        options: [all, mac, windows]
 
 env:
   NODE_VERSION: "24"
@@ -38,6 +38,7 @@ jobs:
         with:
           name: Codex-macOS-${{ matrix.arch }}
           path: out/*.dmg
+          if-no-files-found: error
 
   build-windows:
     if: inputs.platform == 'all' || inputs.platform == 'windows'
@@ -63,32 +64,66 @@ jobs:
         with:
           name: Codex-Windows-x64
           path: out/*.zip
+          if-no-files-found: error
 
-  build-linux:
-    if: inputs.platform == 'all' || inputs.platform == 'linux'
+  # ──────────────────────────────────────────────
+  # Collect artifacts and publish to Releases
+  # ──────────────────────────────────────────────
+  release:
+    needs: [build-mac, build-windows]
+    if: always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x64, arm64]
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-      - run: |
-          npm ci
-      - run: |
-          sudo apt-get update
-          sudo apt-get install -y rpm fakeroot dpkg 7zip
-      - run: node scripts/sync-upstream.js --force --skip-win
-      - run: node scripts/patch-all.js mac-${{ matrix.arch }}
-      - run: npm run build:linux-${{ matrix.arch }}
-      - uses: actions/upload-artifact@v7
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Get upstream version
+        id: version
+        run: |
+          RESULT=$(node scripts/check-update.js --json --force)
+          MAC_ARM64=$(echo "$RESULT" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const j=JSON.parse(d);console.log(j.platforms?.['macOS-arm64']?.version||'')}catch{console.log('')}})")
+          MAC_X64=$(echo "$RESULT" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const j=JSON.parse(d);console.log(j.platforms?.['macOS-x64']?.version||'')}catch{console.log('')}})")
+          WIN_VER=$(echo "$RESULT" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const j=JSON.parse(d);console.log(j.platforms?.Windows?.version||'')}catch{console.log('')}})")
+
+          VERSION="${MAC_ARM64:-${MAC_X64:-$WIN_VER}}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "mac_arm64=$MAC_ARM64" >> "$GITHUB_OUTPUT"
+          echo "mac_x64=$MAC_X64" >> "$GITHUB_OUTPUT"
+          echo "win_version=$WIN_VER" >> "$GITHUB_OUTPUT"
+
+          if [ -z "$VERSION" ]; then echo "No version detected"; exit 1; fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v7
         with:
-          name: Codex-Linux-${{ matrix.arch }}
-          path: |
-            out/make/deb/**/*.deb
-            out/make/rpm/**/*.rpm
-            out/make/zip/**/*.zip
+          path: artifacts
+
+      - name: Display structure
+        run: ls -lhR artifacts/
+
+      - name: Create Release
+        if: steps.version.outputs.version != ''
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Codex ${{ steps.version.outputs.version }}
+          body: |
+            ## Upstream Versions
+            | Platform | Version |
+            |----------|---------|
+            | macOS arm64 | `${{ steps.version.outputs.mac_arm64 || 'N/A' }}` |
+            | macOS x64 | `${{ steps.version.outputs.mac_x64 || 'N/A' }}` |
+            | Windows x64 | `${{ steps.version.outputs.win_version || 'N/A' }}` |
+          files: |
+            artifacts/**/*.dmg
+            artifacts/**/*.zip
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -137,57 +137,11 @@ jobs:
           path: out/*.zip
           if-no-files-found: error
 
-  build-linux:
-    needs: check
-    if: needs.check.outputs.has_update == 'true'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x64, arm64]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y rpm fakeroot dpkg 7zip
-
-      - name: Install dependencies
-        run: |
-          npm ci
-
-      - name: Sync upstream (macOS ZIP for unix, skip Windows)
-        run: node scripts/sync-upstream.js --force --skip-win
-
-      - name: Patch
-        run: node scripts/patch-all.js mac-${{ matrix.arch }}
-
-      - name: Build
-        run: npm run build:linux-${{ matrix.arch }}
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: Codex-Linux-${{ matrix.arch }}
-          path: |
-            out/make/deb/**/*.deb
-            out/make/rpm/**/*.rpm
-            out/make/zip/**/*.zip
-          if-no-files-found: error
-
   # ──────────────────────────────────────────────
   # Bump version + tag + release
   # ──────────────────────────────────────────────
   release:
-    needs: [build-mac, build-windows, build-linux]
+    needs: [build-mac, build-windows]
     if: always() && needs.check.result == 'success'
     runs-on: ubuntu-latest
     permissions:
@@ -259,13 +213,9 @@ jobs:
             | macOS arm64 | `${{ steps.version.outputs.mac_arm64 || 'N/A' }}` |
             | macOS x64 | `${{ steps.version.outputs.mac_x64 || 'N/A' }}` |
             | Windows x64 | `${{ steps.version.outputs.win_version || 'N/A' }}` |
-            | Linux | uses macOS ASAR |
           files: |
             artifacts/**/*.dmg
             artifacts/**/*.zip
-            artifacts/**/*.deb
-            artifacts/**/*.rpm
             artifacts/**/*.exe
-          draft: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
