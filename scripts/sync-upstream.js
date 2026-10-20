@@ -110,6 +110,30 @@ function clearDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
+// MSIX 里 scoped 包名(@scope)被 MakeAppx 百分号编码成 %40scope;
+// 部分版本的 7-Zip 解包时不解码,导致磁盘目录名与 asar 头里的 @scope 路径
+// 对不上,asar extract 时报 ENOENT。这里统一把 %xx 文件名解码回来。
+function decodePercentEncodedNames(dir) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const src = path.join(dir, entry.name);
+    const decoded = entry.name.replace(/%([0-9A-Fa-f]{2})/g, (_, h) =>
+      String.fromCharCode(parseInt(h, 16))
+    );
+    let walkDir = src;
+    if (decoded !== entry.name) {
+      const dest = path.join(dir, decoded);
+      if (fs.existsSync(dest)) {
+        console.log(`   [decode] ${decoded} already exists, merging into it`);
+        walkDir = src; // 子项还在 src 里,递归进去逐个挪
+      } else {
+        fs.renameSync(src, dest);
+        walkDir = dest; // 整体改名,嵌套的 %xx 也要继续处理
+      }
+    }
+    if (entry.isDirectory()) decodePercentEncodedNames(walkDir);
+  }
+}
+
 function countFiles(dir) {
   let n = 0;
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -200,6 +224,7 @@ async function syncWin(destDir) {
   console.log("   [unzip]");
   clearDir(extractDir);
   extractArchive(msixPath, extractDir);
+  decodePercentEncodedNames(extractDir);
 
   const resourcesDir = path.join(extractDir, "app", "resources");
   if (!fs.existsSync(resourcesDir)) {
@@ -264,6 +289,19 @@ function saveVersions(v) {
 
 // ─── Main ───────────────────────────────────────────────────────
 
+// 网络检查偶发超时(MS Store API 尤其常见),重试 3 次再放弃
+async function withRetry(fn, label, attempts = 3) {
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (i === attempts) throw e;
+      console.log(`   [retry] ${label}: attempt ${i} failed (${e.message}), retrying...`);
+      await new Promise((r) => setTimeout(r, 5000 * i));
+    }
+  }
+}
+
 async function main() {
   console.log("== Codex upstream sync ==\n");
   fs.mkdirSync(TEMP_DIR, { recursive: true });
@@ -273,13 +311,13 @@ async function main() {
   // Detect versions
   if (!SKIP_MAC) {
     try {
-      const arm64Info = await getAppcastVersion(APPCAST_ARM64);
+      const arm64Info = await withRetry(() => getAppcastVersion(APPCAST_ARM64), "mac-arm64 check");
       console.log(`\n   mac-arm64: ${arm64Info.version} (build ${arm64Info.build})`);
       results["mac-arm64"] = arm64Info;
     } catch (e) { console.error(`   [x] mac-arm64 check: ${e.message}`); }
 
     try {
-      const x64Info = await getAppcastVersion(APPCAST_X64);
+      const x64Info = await withRetry(() => getAppcastVersion(APPCAST_X64), "mac-x64 check");
       console.log(`   mac-x64:   ${x64Info.version} (build ${x64Info.build})`);
       results["mac-x64"] = x64Info;
     } catch (e) { console.error(`   [x] mac-x64 check: ${e.message}`); }
@@ -287,7 +325,7 @@ async function main() {
 
   if (!SKIP_WIN) {
     try {
-      const winInfo = await getWindowsVersion();
+      const winInfo = await withRetry(() => getWindowsVersion(), "win check");
       console.log(`   win:       ${winInfo.version}`);
       results.win = winInfo;
     } catch (e) { console.error(`   [x] win check: ${e.message}`); }
@@ -324,6 +362,18 @@ async function main() {
   console.log("\n== Done ==");
   for (const [key, info] of Object.entries(results)) {
     console.log(`   ${key}: ${info.version}`);
+  }
+
+  // 构建流程里指定要同步的平台就必须成功,否则 src 缺目录会让后续 patch/build
+  // 以更费解的方式失败;这里直接报错退出,让 CI 在 sync 步骤就停下
+  const missing = [];
+  if (!SKIP_MAC) {
+    if (!results["mac-arm64"]) missing.push("mac-arm64");
+    if (!results["mac-x64"]) missing.push("mac-x64");
+  }
+  if (!SKIP_WIN && !results.win) missing.push("win");
+  if (missing.length > 0) {
+    throw new Error(`sync failed for: ${missing.join(", ")} (see [x] lines above)`);
   }
 }
 
