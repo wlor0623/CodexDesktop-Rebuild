@@ -108,6 +108,19 @@ jobs:
       - name: Display structure
         run: ls -lhR artifacts/
 
+      # 单平台触发时只有 zip 或只有 dmg，属正常情况；
+      # 但一个产物都没有说明出错了，要拦住（防止空 release）
+      - name: Check artifacts exist
+        run: |
+          shopt -s globstar nullglob
+          files=(artifacts/**/*.dmg artifacts/**/*.zip)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::No .dmg/.zip artifacts found under artifacts/"
+            exit 1
+          fi
+          echo "Found ${#files[@]} artifact file(s):"
+          printf '  %s\n' "${files[@]}"
+
       - name: Create Release
         if: steps.version.outputs.version != ''
         uses: softprops/action-gh-release@v3
@@ -124,6 +137,6 @@ jobs:
           files: |
             artifacts/**/*.dmg
             artifacts/**/*.zip
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
